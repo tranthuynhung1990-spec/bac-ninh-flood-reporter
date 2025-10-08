@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bắc Giang Flood Reporter | Web GIS</title>
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Leaflet.draw -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+  <!-- Geocoder -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+  <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+  <!-- PapaParse for CSV -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    #map { height: calc(100vh - 140px); }
+    .leaflet-container { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    .brand { letter-spacing: .5px; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <!-- Header -->
+  <header class="w-full bg-white shadow-sm sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-2xl bg-blue-600 shadow-md flex items-center justify-center text-white font-bold">BG</div>
+        <div>
+          <h1 class="brand text-lg font-semibold">Bắc Giang Flood Reporter</h1>
+          <p class="text-xs text-gray-500 -mt-1">Web GIS báo cáo vị trí ngập do cộng đồng</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btnExportGeoJSON" class="px-3 py-2 text-sm rounded-xl bg-blue-600 text-white shadow hover:bg-blue-700">Tải GeoJSON</button>
+        <button id="btnExportCSV" class="px-3 py-2 text-sm rounded-xl bg-gray-800 text-white shadow hover:bg-black">Tải CSV</button>
+        <button id="btnClear" class="px-3 py-2 text-sm rounded-xl bg-red-600 text-white shadow hover:bg-red-700">Xóa toàn bộ</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Toolbar -->
+  <section class="max-w-7xl mx-auto px-4 py-3 grid md:grid-cols-12 gap-3">
+    <div class="md:col-span-8">
+      <div class="bg-white rounded-2xl p-3 shadow-sm border border-gray-100">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="text-sm text-gray-600">📍 Nhấp vào bản đồ để tạo điểm ngập nhanh.</div>
+          <div class="flex-1"></div>
+          <label class="inline-flex items-center gap-2 text-sm">
+            <input id="snapToBacGiang" type="checkbox" class="rounded" checked>
+            Chỉ cho phép trong phạm vi Bắc Giang
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="md:col-span-4">
+      <div class="bg-white rounded-2xl p-3 shadow-sm border border-gray-100 flex flex-col md:flex-row items-center gap-3 md:gap-2">
+        <input id="fileInput" type="file" accept=".geojson,.json,.csv" class="block w-full text-sm text-gray-700 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+        <button id="btnSample" class="px-3 py-2 text-sm rounded-xl bg-emerald-600 text-white shadow hover:bg-emerald-700">Nhập mẫu</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Map -->
+  <div id="map" class="max-w-7xl mx-auto rounded-2xl shadow border border-gray-100"></div>
+
+  <!-- Point Form Modal -->
+  <div id="modal" class="hidden fixed inset-0 bg-black/40 backdrop-blur-sm z-[1000] items-center justify-center p-4">
+    <div class="bg-white w-full max-w-xl rounded-2xl shadow-xl">
+      <div class="px-5 py-4 border-b flex items-center justify-between">
+        <h2 class="text-lg font-semibold">Thêm/Sửa điểm ngập</h2>
+        <button id="btnCloseModal" class="text-gray-500 hover:text-black">✕</button>
+      </div>
+      <div class="p-5 grid grid-cols-1 gap-3">
+        <div class="grid grid-cols-2 gap-3">
+          <label class="text-sm">Tiêu đề
+            <input id="f_title" class="mt-1 w-full rounded-xl border-gray-300 shadow-sm" placeholder="Ví dụ: Ngập trước Trường THPT…"/>
+          </label>
+          <label class="text-sm">Mức ngập (cm)
+            <input id="f_depth" type="number" min="0" class="mt-1 w-full rounded-xl border-gray-300 shadow-sm" placeholder="Ví dụ: 30"/>
+          </label>
+        </div>
+        <label class="text-sm">Mô tả
+          <textarea id="f_desc" rows="3" class="mt-1 w-full rounded-xl border-gray-300 shadow-sm" placeholder="Nội dung mô tả ngắn…"></textarea>
+        </label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="text-sm">Ngày giờ
+            <input id="f_datetime" type="datetime-local" class="mt-1 w-full rounded-xl border-gray-300 shadow-sm" />
+          </label>
+          <label class="text-sm">Phường/xã (tùy chọn)
+            <input id="f_ward" class="mt-1 w-full rounded-xl border-gray-300 shadow-sm" placeholder="Tên xã/phường"/>
+          </label>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="text-sm">Vĩ độ (lat)
+            <input id="f_lat" type="number" step="any" class="mt-1 w-full rounded-xl border-gray-300 shadow-sm" />
+          </label>
+          <label class="text-sm">Kinh độ (lng)
+            <input id="f_lng" type="number" step="any" class="mt-1 w-full rounded-xl border-gray-300 shadow-sm" />
+          </label>
+        </div>
+        <div class="flex items-center justify-between pt-2">
+          <div class="text-xs text-gray-500">Dữ liệu được lưu tạm trên trình duyệt (localStorage). Bạn có thể <b>Tải GeoJSON</b> để nộp lên máy chủ.</div>
+          <div class="flex items-center gap-2">
+            <button id="btnDeletePoint" class="px-3 py-2 text-sm rounded-xl bg-red-50 text-red-600 hover:bg-red-100 hidden">Xóa</button>
+            <button id="btnSavePoint" class="px-3 py-2 text-sm rounded-xl bg-blue-600 text-white hover:bg-blue-700">Lưu</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Map setup ---
+    const BAC_GIANG_CENTER = [21.30, 106.20];
+    const BAC_GIANG_BOUNDS = L.latLngBounds([21.02, 105.88], [21.56, 106.54]); // xấp xỉ
+
+    const map = L.map('map', {
+      center: BAC_GIANG_CENTER,
+      zoom: 11,
+      minZoom: 9,
+      maxZoom: 19,
+      zoomControl: false,
+    });
+
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Esri World Imagery'
+    });
+
+    const baseMaps = { 'OpenStreetMap': osm, 'ESRI Imagery': esri };
+
+    const uploadedLayer = L.geoJSON(null, {
+      pointToLayer: (f, latlng) => L.circleMarker(latlng, {
+        radius: 7, weight: 2, color: '#1d4ed8', fillColor: '#93c5fd', fillOpacity: .8
+      }),
+      onEachFeature: (f, layer) => layer.bindPopup(popupHtml(f))
+    });
+
+    const drawnLayer = L.geoJSON(null, {
+      pointToLayer: (f, latlng) => L.circleMarker(latlng, {
+        radius: 7, weight: 2, color: '#047857', fillColor: '#6ee7b7', fillOpacity: .85
+      }),
+      onEachFeature: (f, layer) => layer.bindPopup(popupHtml(f))
+    }).addTo(map);
+
+    const overlays = { 'Báo cáo tải lên': uploadedLayer, 'Báo cáo do người dùng vẽ': drawnLayer };
+    L.control.layers(baseMaps, overlays, { collapsed: true }).addTo(map);
+
+    // Geocoder
+    L.Control.geocoder({ defaultMarkGeocode: false, placeholder: 'Tìm kiếm địa điểm…' })
+      .on('markgeocode', function(e) {
+        map.fitBounds(e.geocode.bbox);
+      })
+      .addTo(map);
+
+    // Draw tools (points & polygons if cần)
+    const drawControl = new L.Control.Draw({
+      position: 'topright',
+      draw: {
+        marker: true,
+        circle: false,
+        circlemarker: false,
+        rectangle: false,
+        polyline: false,
+        polygon: {
+          allowIntersection: false,
+          showArea: true,
+        }
+      },
+      edit: { featureGroup: drawnLayer }
+    });
+    map.addControl(drawControl);
+
+    map.on(L.Draw.Event.CREATED, function (e) {
+      const layer = e.layer;
+      if (e.layerType === 'marker' || e.layerType === 'circlemarker') {
+        const latlng = layer.getLatLng();
+        openModal({ lat: latlng.lat, lng: latlng.lng });
+      } else {
+        drawnLayer.addLayer(layer);
+      }
+    });
+
+    map.on('click', (e) => {
+      if (document.querySelector('#snapToBacGiang').checked && !BAC_GIANG_BOUNDS.contains(e.latlng)) {
+        alert('Điểm nằm ngoài phạm vi Bắc Giang.');
+        return;
+      }
+      openModal({ lat: e.latlng.lat, lng: e.latlng.lng });
+    });
+
+    // --- Modal logic ---
+    const modal = document.getElementById('modal');
+    const btnCloseModal = document.getElementById('btnCloseModal');
+    const btnSavePoint = document.getElementById('btnSavePoint');
+    const btnDeletePoint = document.getElementById('btnDeletePoint');
+    const f_title = document.getElementById('f_title');
+    const f_depth = document.getElementById('f_depth');
+    const f_desc = document.getElementById('f_desc');
+    const f_datetime = document.getElementById('f_datetime');
+    const f_ward = document.getElementById('f_ward');
+    const f_lat = document.getElementById('f_lat');
+    const f_lng = document.getElementById('f_lng');
+
+    let editingId = null;
+
+    function openModal(data = {}) {
+      editingId = data.id || null;
+      f_title.value = data.title || '';
+      f_depth.value = data.depth || '';
+      f_desc.value = data.desc || '';
+      f_datetime.value = data.datetime || new Date().toISOString().slice(0,16);
+      f_ward.value = data.ward || '';
+      f_lat.value = (data.lat ?? '').toString();
+      f_lng.value = (data.lng ?? '').toString();
+      btnDeletePoint.classList.toggle('hidden', !editingId);
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+    function closeModal(){ modal.classList.add('hidden'); modal.classList.remove('flex'); }
+
+    btnCloseModal.addEventListener('click', closeModal);
+
+    btnSavePoint.addEventListener('click', () => {
+      const lat = parseFloat(f_lat.value), lng = parseFloat(f_lng.value);
+      if (!isFinite(lat) || !isFinite(lng)) { alert('Tọa độ không hợp lệ.'); return; }
+      const feature = {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lng, lat] },
+        properties: {
+          id: editingId || crypto.randomUUID(),
+          title: f_title.value || 'Điểm ngập',
+          depth_cm: f_depth.value ? Number(f_depth.value) : null,
+          description: f_desc.value || '',
+          datetime: f_datetime.value || null,
+          ward: f_ward.value || '',
+          source: 'user'
+        }
+      };
+      upsertFeature(feature);
+      closeModal();
+    });
+
+    btnDeletePoint.addEventListener('click', () => {
+      if (!editingId) return;
+      removeFeature(editingId);
+      closeModal();
+    });
+
+    function popupHtml(f){
+      const p = f.properties || {}; const c = f.geometry.coordinates;
+      const dt = p.datetime ? new Date(p.datetime).toLocaleString() : 'Không rõ';
+      return `
+        <div class="text-sm">
+          <div class="font-semibold mb-1">${p.title || 'Điểm ngập'}</div>
+          <div class="grid grid-cols-2 gap-1">
+            <div><span class="text-gray-500">Độ sâu:</span> ${p.depth_cm ?? '—'} cm</div>
+            <div><span class="text-gray-500">Thời gian:</span> ${dt}</div>
+            <div><span class="text-gray-500">Xã/phường:</span> ${p.ward || '—'}</div>
+            <div><span class="text-gray-500">Nguồn:</span> ${p.source || '—'}</div>
+            <div class="col-span-2"><span class="text-gray-500">Mô tả:</span> ${p.description || '—'}</div>
+            <div class="col-span-2 text-xs text-gray-500">[${c[1].toFixed(6)}, ${c[0].toFixed(6)}]</div>
+          </div>
+          <div class="mt-2 flex gap-2">
+            <button class="px-2 py-1 rounded-lg bg-blue-600 text-white text-xs" onclick='window.editFeature("${p.id}")'>Sửa</button>
+            <button class="px-2 py-1 rounded-lg bg-red-600 text-white text-xs" onclick='window.deleteFeature("${p.id}")'>Xóa</button>
+          </div>
+        </div>`;
+    }
+
+    // --- Store & layer helpers ---
+    const STORAGE_KEY = 'bg_flood_reports_v1';
+
+    function loadFromStorage(){
+      try {
+        const json = localStorage.getItem(STORAGE_KEY);
+        if (!json) return [];
+        const fc = JSON.parse(json);
+        drawnLayer.clearLayers();
+        uploadedLayer.clearLayers();
+        L.geoJSON(fc, { onEachFeature: (f,l)=>{}, pointToLayer: (f,latlng)=>L.circleMarker(latlng, {radius:7,weight:2,color:'#047857',fillColor:'#6ee7b7',fillOpacity:.85}) }).eachLayer(l=>drawnLayer.addLayer(l));
+        return fc.features || [];
+      } catch(e){ console.warn(e); return []; }
+    }
+
+    function saveToStorage(){
+      const fc = getFeatureCollection();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(fc));
+    }
+
+    function getFeatureCollection(){
+      const features = [];
+      drawnLayer.eachLayer(l => { if (l.toGeoJSON) features.push(l.toGeoJSON()); });
+      return { type: 'FeatureCollection', features };
+    }
+
+    function upsertFeature(feature){
+      // remove if exists by id
+      let target = null;
+      drawnLayer.eachLayer(l => {
+        const f = l.toGeoJSON();
+        if (f.properties && f.properties.id === feature.properties.id) target = l;
+      });
+      if (target) drawnLayer.removeLayer(target);
+      const layer = L.geoJSON(feature, { pointToLayer: (f, latlng)=>L.circleMarker(latlng,{radius:7,weight:2,color:'#047857',fillColor:'#6ee7b7',fillOpacity:.85}), onEachFeature:(f,l)=>l.bindPopup(popupHtml(f)) });
+      layer.eachLayer(l=>drawnLayer.addLayer(l));
+      saveToStorage();
+    }
+
+    function removeFeature(id){
+      let removed = false;
+      drawnLayer.eachLayer(l => {
+        const f = l.toGeoJSON();
+        if (f.properties && f.properties.id === id){
+          drawnLayer.removeLayer(l); removed = true;
+        }
+      });
+      if (removed) saveToStorage();
+    }
+
+    window.editFeature = function(id){
+      drawnLayer.eachLayer(l => {
+        const f = l.toGeoJSON();
+        if (f.properties && f.properties.id === id){
+          const [lng,lat] = f.geometry.coordinates;
+          openModal({ id, title:f.properties.title, depth:f.properties.depth_cm, desc:f.properties.description, datetime:f.properties.datetime, ward:f.properties.ward, lat, lng });
+        }
+      });
+    }
+    window.deleteFeature = function(id){ removeFeature(id); }
+
+    // Load existing from storage
+    loadFromStorage();
+
+    // --- File upload ---
+    document.getElementById('fileInput').addEventListener('change', handleFile);
+
+    async function handleFile(e){
+      const file = e.target.files[0]; if (!file) return;
+      const name = file.name.toLowerCase();
+      if (name.endsWith('.csv')) {
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: ({ data }) => {
+            const feats = [];
+            for (const row of data){
+              const lat = parseFloat(row.lat || row.latitude || row.vĩ_độ || row.ViDo);
+              const lng = parseFloat(row.lng || row.lon || row.longitude || row.kinh_độ || row.KinhDo);
+              if (!isFinite(lat) || !isFinite(lng)) continue;
+              const p = {
+                id: crypto.randomUUID(),
+                title: row.title || row.name || 'Điểm ngập',
+                depth_cm: row.depth_cm ? Number(row.depth_cm) : null,
+                description: row.description || '',
+                datetime: row.datetime || null,
+                ward: row.ward || '',
+                source: 'csv-upload'
+              };
+              feats.push({ type:'Feature', geometry:{ type:'Point', coordinates:[lng,lat] }, properties:p });
+            }
+            addUploadedFeatures(feats);
+          }
+        });
+      } else if (name.endsWith('.geojson') || name.endsWith('.json')){
+        const text = await file.text();
+        const geo = JSON.parse(text);
+        const feats = geo.type === 'FeatureCollection' ? geo.features : [geo];
+        addUploadedFeatures(feats);
+      } else {
+        alert('Định dạng không hỗ trợ. Hãy chọn CSV hoặc GeoJSON.');
+      }
+      e.target.value = '';
+    }
+
+    function addUploadedFeatures(features){
+      const filtered = features.filter(f => f && f.geometry && f.geometry.type === 'Point');
+      uploadedLayer.addData({ type:'FeatureCollection', features: filtered });
+      if (uploadedLayer.getLayers().length) map.fitBounds(uploadedLayer.getBounds(), { padding:[20,20] });
+    }
+
+    // Sample button: load small demo points
+    document.getElementById('btnSample').addEventListener('click', () => {
+      const demos = [
+        { t:'Ngập cục bộ', d:25, lat:21.2865, lng:106.1973, w:'TP. Bắc Giang' },
+        { t:'Đọng nước sau mưa lớn', d:15, lat:21.3532, lng:106.2708, w:'Việt Yên' },
+        { t:'Ngập mặt đường', d:40, lat:21.2278, lng:106.1461, w:'Yên Dũng' }
+      ].map(r=>({type:'Feature', geometry:{type:'Point', coordinates:[r.lng,r.lat]}, properties:{id:crypto.randomUUID(), title:r.t, depth_cm:r.d, ward:r.w, datetime:new Date().toISOString(), description:'Mẫu minh họa', source:'sample'}}));
+      addUploadedFeatures(demos);
+    });
+
+    // --- Export ---
+    document.getElementById('btnExportGeoJSON').addEventListener('click', () => {
+      const fc = getFeatureCollection();
+      downloadText(JSON.stringify(fc, null, 2), 'bac_giang_flood_reports.geojson');
+    });
+    document.getElementById('btnExportCSV').addEventListener('click', () => {
+      const rows = [['id','title','depth_cm','description','datetime','ward','lat','lng','source']];
+      drawnLayer.eachLayer(l => {
+        const f = l.toGeoJSON();
+        const p = f.properties || {}; const [lng,lat] = f.geometry.coordinates;
+        rows.push([p.id, p.title||'', p.depth_cm??'', p.description||'', p.datetime||'', p.ward||'', lat, lng, p.source||'user']);
+      });
+      const csv = rows.map(r=>r.map(v => (v==null?'':String(v)).replaceAll('"','""')).map(v=>`"${v}"`).join(',')).join('\n');
+      downloadText(csv, 'bac_giang_flood_reports.csv');
+    });
+
+    document.getElementById('btnClear').addEventListener('click', () => {
+      if (!confirm('Xóa toàn bộ điểm do bạn tạo?')) return;
+      drawnLayer.clearLayers();
+      saveToStorage();
+    });
+
+    function downloadText(text, filename){
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // Save state when layers change
+    drawnLayer.on('layeradd', saveToStorage);
+    drawnLayer.on('layerremove', saveToStorage);
+  </script>
+</body>
+</html>
